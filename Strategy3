@@ -1,0 +1,68 @@
+import backtrader as bt
+import pandas as pd
+
+class VWAPCrossoverStrategy(bt.Strategy):
+    params = (
+        ('take_profit', 0.03),
+        ('stop_loss', 0.03),
+    )
+
+    def __init__(self):
+        self.vwap = bt.indicators.VWAP(self.data)
+        self.order = None
+        self.entry_price = 0
+
+    def notify_order(self, order):
+        if order.status in [order.Submitted, order.Accepted]:
+            return  # Waiting for the order to be completed
+
+        if order.status in [order.Completed]:
+            if order.isbuy():
+                self.entry_price = order.executed.price
+            elif order.issell():
+                self.entry_price = 0  # Reset entry price after selling
+
+        self.order = None
+
+    def next(self):
+        if self.order:
+            return  # Waiting for the previous order to be completed
+
+        if not self.position:
+            # Check for buy signal
+            if self.data.close[0] > self.vwap[0] and self.data.close[-1] <= self.vwap[-1]:
+                self.order = self.buy()
+        else:
+            # Check for take profit or stop loss
+            if self.data.close[0] >= self.entry_price * (1 + self.p.take_profit):
+                self.order = self.sell()
+            elif self.data.close[0] <= self.entry_price * (1 - self.p.stop_loss):
+                self.order = self.sell()
+
+# Load data
+data = pd.read_csv('NVDA_1y_5m.csv', index_col='Datetime', parse_dates=True)
+data = data.rename(columns={'Adj Close': 'Adj_Close'})
+data = data[['Open', 'High', 'Low', 'Close', 'Volume']]
+
+# Initialize Cerebro
+cerebro = bt.Cerebro()
+cerebro.addstrategy(VWAPCrossoverStrategy)
+
+# Feed data to Cerebro
+data_feed = bt.feeds.PandasData(dataname=data)
+cerebro.adddata(data_feed)
+
+# Set initial cash
+cerebro.broker.setcash(100.0)
+
+# Set commission
+cerebro.broker.setcommission(commission=0.001)
+
+# Run backtest
+print('Starting Portfolio Value: %.2f' % cerebro.broker.getvalue())
+cerebro.run()
+print('Ending Portfolio Value: %.2f' % cerebro.broker.getvalue())
+
+# Plot results
+cerebro.plot()
+
